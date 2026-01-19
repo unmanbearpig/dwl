@@ -24,8 +24,8 @@ WLR_LIBS = `$(PKG_CONFIG) --libs wlroots-0.20`
 #	-I$(PWD)/wlroots/0.20/include/wlroots-0.20
 #WLR_LIBS = -Wl,-rpath,$(PWD)/wlroots/0.20/lib64 -L$(PWD)/wlroots/0.20/lib64 -lwlroots-0.20
 
-XWAYLAND =
-XLIBS =
+XWAYLAND = -DWAYLAND
+XLIBS = xcb xcb-icccm
 # Uncomment to build XWayland support
 #XWAYLAND = -DXWAYLAND
 #XLIBS = xcb xcb-icccm
