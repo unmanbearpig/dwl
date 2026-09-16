@@ -855,7 +855,6 @@ buttonpress(struct wl_listener *listener, void *data)
 				click = ClkTitle;
 		}
 
-
 		/* Change focus if the button was _pressed_ over a client
 		   or a layer surface with on-demand keyboard interactivity */
 		xytonode(cursor->x, cursor->y, NULL, &c, &l, NULL, NULL);
@@ -1146,8 +1145,7 @@ commitnotify(struct wl_listener *listener, void *data)
 			&& !c->isfullscreen && !c->isfloating)
 		c->mon->lt[c->mon->sellt]->arrange(c->mon);
 	else
-		resize(c, c->geom, (c->isfloating && !c->isfullscreen), (c->isfloating && !c->isfullscreen));
-
+		resize(c, c->geom, (c->isfloating && !c->isfullscreen), c->bw > 0);
 }
 
 void
@@ -1363,7 +1361,7 @@ createmon(struct wl_listener *listener, void *data)
 	wl_list_insert(&mons, &m->link);
 	drawbars();
 
-	m->pertag = calloc(1, sizeof(Pertag));
+	m->pertag = ecalloc(1, sizeof(Pertag));
 	m->pertag->curtag = m->pertag->prevtag = 1;
 
 	for (i = 0; i <= LENGTH(tags); i++) {
@@ -2751,7 +2749,8 @@ setlayout(const Arg *arg)
 		/* floating layout, draw borders around all clients */
 		Client *c;
 		wl_list_for_each(c, &clients, link)
-			resize(c, c->mon->m, 0, 1);
+			if (VISIBLEON(c, selmon) && !c->isfullscreen)
+				resize(c, c->geom, 0, 1);
 	}
 	arrange(selmon);
 	drawbar(selmon);
@@ -3092,12 +3091,19 @@ statusin(int fd, unsigned int mask, void *data)
 
 	if (mask & WL_EVENT_ERROR)
 		die("status in event error");
-	if (mask & WL_EVENT_HANGUP)
-		wl_event_source_remove(status_event_source);
-
 	n = read(fd, status, sizeof(status) - 1);
-	if (n < 0 && errno != EWOULDBLOCK)
+	if (n < 0) {
+		if (errno == EAGAIN || errno == EINTR)
+			return 0;
 		die("read:");
+	}
+	if (n == 0 || (mask & WL_EVENT_HANGUP)) {
+		if (status_event_source)
+			wl_event_source_remove(status_event_source);
+		status_event_source = NULL;
+		if (n == 0)
+			return 0;
+	}
 
 	status[n] = '\0';
 	status[strcspn(status, "\n")] = '\0';
@@ -3213,13 +3219,11 @@ toggleview(const Arg *arg)
 	if (!(newtagset = selmon ? selmon->tagset[selmon->seltags] ^ (arg->ui & TAGMASK) : 0))
 		return;
 
-	if (newtagset == (uint32_t)~0) {
+	if (newtagset == TAGMASK) {
 		selmon->pertag->prevtag = selmon->pertag->curtag;
 		selmon->pertag->curtag = 0;
-	}
-
-	/* test if the user did not select the same tag */
-	if (!(newtagset & 1 << (selmon->pertag->curtag - 1))) {
+	} else if (!selmon->pertag->curtag ||
+			!(newtagset & (1u << (selmon->pertag->curtag - 1)))) {
 		selmon->pertag->prevtag = selmon->pertag->curtag;
 		for (i = 0; !(newtagset & 1 << i); i++) ;
 		selmon->pertag->curtag = i + 1;
@@ -3293,7 +3297,12 @@ unmapnotify(struct wl_listener *listener, void *data)
 	}
 #endif
 
-	wlr_scene_node_destroy(&c->image_capture_scene->tree.node);
+	/* Unmanaged XWayland popups do not have a capture scene. */
+	if (c->image_capture_scene) {
+		wlr_scene_node_destroy(&c->image_capture_scene->tree.node);
+		c->image_capture_scene = NULL;
+		c->image_capture_source = NULL;
+	}
 	wlr_scene_node_destroy(&c->scene->node);
 	client_surface(c)->data = NULL;
 	drawbars();
@@ -3490,11 +3499,11 @@ view(const Arg *arg)
 	if (!selmon || (arg->ui & TAGMASK) == selmon->tagset[selmon->seltags])
 		return;
 	selmon->seltags ^= 1; /* toggle sel tagset */
-	if (arg->ui & ~0) {
+	if (arg->ui & TAGMASK) {
 		selmon->tagset[selmon->seltags] = arg->ui & TAGMASK;
 		selmon->pertag->prevtag = selmon->pertag->curtag;
 
-		if (arg->ui == TAGMASK)
+		if ((arg->ui & TAGMASK) == TAGMASK)
 			selmon->pertag->curtag = 0;
 		else {
 			for (i = 0; !(arg->ui & 1 << i); i++) ;

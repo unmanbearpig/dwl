@@ -17,7 +17,7 @@ DWLCFLAGS = `$(PKG_CONFIG) --cflags $(PKGS)` $(WLR_INCS) $(DWLCPPFLAGS) $(DWLDEV
 LDLIBS    = `$(PKG_CONFIG) --libs $(PKGS)` $(WLR_LIBS) -lm $(LIBS)
 
 all: dwl
-dwl: dwl.c client.h config.h ime.h util.h config.mk cursor-shape-v1-protocol.h \
+dwl: dwl.c client.h config.h drwl.h ime.h util.h config.mk cursor-shape-v1-protocol.h \
 	ext-image-copy-capture-v1-protocol.h \
 	pointer-constraints-unstable-v1-protocol.h wlr-layer-shell-unstable-v1-protocol.h \
 	wlr-output-power-management-unstable-v1-protocol.h xdg-shell-protocol.h
@@ -51,12 +51,12 @@ xdg-shell-protocol.h:
 config.h:
 	cp config.def.h $@
 clean:
-	rm -f dwl *.o *-protocol.h
+	rm -f dwl *.o *-protocol.h tests/headless tests/xclient
 
 dist: clean
 	mkdir -p dwl-$(VERSION)
 	cp -R LICENSE* Makefile CHANGELOG.md README.md client.h config.def.h \
-		config.mk protocols dwl.1 dwl.c ime.h util.h dwl.desktop \
+		config.mk protocols dwl.1 dwl.c drwl.h ime.h util.h dwl.desktop tests \
 		dwl-$(VERSION)
 	tar -caf dwl-$(VERSION).tar.gz dwl-$(VERSION)
 	rm -rf dwl-$(VERSION)
@@ -75,3 +75,14 @@ install: dwl
 uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/dwl $(DESTDIR)$(MANDIR)/man1/dwl.1 \
 		$(DESTDIR)$(DATADIR)/wayland-sessions/dwl.desktop
+
+# Headless integration checks require foot, grim, Python 3, and XWayland.
+TESTFLAGS = -fsanitize=address,undefined -fno-omit-frame-pointer
+check: tests/headless tests/xclient
+	python3 tests/run-headless.py
+
+tests/headless: tests/headless.c dwl
+	$(CC) tests/headless.c $(DWLCFLAGS) $(TESTFLAGS) $(LDFLAGS) $(LDLIBS) -o $@
+
+tests/xclient: tests/xclient.c
+	$(CC) tests/xclient.c $(CFLAGS) `$(PKG_CONFIG) --cflags --libs xcb` -o $@
