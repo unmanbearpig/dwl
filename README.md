@@ -1,5 +1,24 @@
 # dwl - dwm for Wayland
 
+This is [unmanbearpig](https://github.com/unmanbearpig)'s personal fork of
+[upstream dwl](https://codeberg.org/dwl/dwl). It includes:
+
+- Shared separators between tiled windows, with no outer frames or padding.
+  Separator colors follow focus and urgency; floating windows keep their borders.
+- A dwm-style status bar and per-tag layout settings.
+- Smart borders in monocle and an `unfloatall()` helper for tiling floating windows.
+- XWayland support and headless regression checks.
+
+This checkout builds against **wlroots 0.20**. The bar also requires **fcft** and
+**pixman**. Run `make` to build, then customize the generated `config.h` and
+rebuild. Personal `config.h` settings are ignored by Git.
+
+Run `make check` to exercise real Wayland and XWayland clients on isolated headless
+outputs, including screenshot checks for tiled separators. See
+[tests/README.md](tests/README.md) for test dependencies and coverage.
+
+The upstream introduction and usage notes follow.
+
 Join us on our [Discord server]  
 Or Matrix: [#dwl-official:matrix.org]  
 Or on our IRC channel: [#dwl on Libera Chat]
