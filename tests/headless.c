@@ -115,7 +115,7 @@ tick(void *data)
 		if (!(b = findclient("dwl-test-b"))) goto wait;
 		CHECK(a->bw == borderpx && b->bw == borderpx);
 		CHECK(a->geom.width + b->geom.width == first->w.width);
-		focusclient(a, 1);
+		focusclient(a, NULL, 1);
 		setfullscreen(a, 1);
 		CHECK(a->bw == 0 && a->geom.height == first->m.height);
 		CHECK(a->scene->node.parent == layers[LyrFS]);
@@ -134,7 +134,7 @@ tick(void *data)
 		CHECK(a->bw == borderpx); /* client commits must preserve floating-layout borders */
 		setlayout(&(Arg){.v = &layouts[0]});
 		CHECK(a->bw == 0);
-		focusclient(a, 1);
+		focusclient(a, NULL, 1);
 		togglebar(NULL);
 		CHECK(!first->scene_buffer->node.enabled && a->geom.height == first->m.height);
 		togglebar(NULL);

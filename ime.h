@@ -594,7 +594,7 @@ handle_focused_surface_destroy(struct wl_listener *listener,
 }
 
 struct input_method_relay *
-input_method_relay_create()
+input_method_relay_create(void)
 {
 	struct input_method_relay *relay = ecalloc(1, sizeof(*relay));
 	wl_list_init(&relay->text_inputs);
