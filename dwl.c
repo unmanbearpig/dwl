@@ -392,6 +392,7 @@ static void tile(Monitor *m);
 static void togglebar(const Arg *arg);
 static void togglefloating(const Arg *arg);
 static void togglefullscreen(const Arg *arg);
+static void unfloatall(const Arg *arg);
 static void toggletag(const Arg *arg);
 static void toggleview(const Arg *arg);
 static void unlocksession(struct wl_listener *listener, void *data);
@@ -3187,6 +3188,19 @@ togglefloating(const Arg *arg)
 	/* return if fullscreen */
 	if (sel && !sel->isfullscreen)
 		setfloating(sel, !sel->isfloating);
+}
+
+void
+unfloatall(const Arg *arg)
+{
+	Client *c;
+	if (!selmon)
+		return;
+	wl_list_for_each(c, &clients, link) {
+		if (VISIBLEON(c, selmon) && c->isfloating && !c->isfullscreen)
+			setfloating(c, 0);
+	}
+	arrange(selmon);
 }
 
 void
