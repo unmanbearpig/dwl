@@ -170,6 +170,11 @@ typedef struct {
 } Client;
 
 typedef struct {
+	struct wlr_scene_rect *rect;
+	Client *a, *b; /* clients sharing this separator */
+} Separator;
+
+typedef struct {
 	uint32_t mod;
 	xkb_keysym_t keysym;
 	void (*func)(const Arg *);
@@ -225,6 +230,7 @@ struct Monitor {
 	struct wlr_scene_output *scene_output;
 	struct wlr_scene_buffer *scene_buffer; /* bar buffer */
 	struct wlr_scene_rect *fullscreen_bg; /* See createmon() for info */
+	struct wlr_scene_tree *separators;
 	struct wl_listener frame;
 	struct wl_listener destroy;
 	struct wl_listener request_state;
@@ -308,6 +314,7 @@ static void checkidleinhibitor(struct wlr_surface *exclude);
 static void cleanup(void);
 static void cleanupmon(struct wl_listener *listener, void *data);
 static void cleanuplisteners(void);
+static void clearseparators(Monitor *m);
 static void closemon(Monitor *m);
 static void commitlayersurfacenotify(struct wl_listener *listener, void *data);
 static void commitlocksurface(struct wl_listener *listener, void *data);
@@ -340,6 +347,7 @@ static void destroykeyboardgroup(struct wl_listener *listener, void *data);
 static Monitor *dirtomon(enum wlr_direction dir);
 static void drawbar(Monitor *m);
 static void drawbars(void);
+static void drawseparators(Monitor *m);
 static void focusclient(Client *c, LayerSurface *l, int lift);
 static void focusmon(const Arg *arg);
 static void focusstack(const Arg *arg);
@@ -402,6 +410,7 @@ static void unlocksession(struct wl_listener *listener, void *data);
 static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
 static void unmapnotify(struct wl_listener *listener, void *data);
 static void updatemons(struct wl_listener *listener, void *data);
+static void updateseparatorcolors(void);
 static void updatebar(Monitor *m);
 static void updatetitle(struct wl_listener *listener, void *data);
 static void urgent(struct wl_listener *listener, void *data);
@@ -639,6 +648,8 @@ arrange(Monitor *m)
 
 	if (m->lt[m->sellt]->arrange)
 		m->lt[m->sellt]->arrange(m);
+	if (m->lt[m->sellt]->arrange != tile)
+		clearseparators(m);
 	motionnotify(0, NULL, 0, 0, 0, 0);
 	checkidleinhibitor(NULL);
 }
@@ -1014,6 +1025,8 @@ cleanupmon(struct wl_listener *listener, void *data)
 
 	free(m->pertag);
 	closemon(m);
+	clearseparators(m);
+	wlr_scene_node_destroy(&m->separators->node);
 	wlr_scene_node_destroy(&m->fullscreen_bg->node);
 	wlr_scene_node_destroy(&m->scene_buffer->node);
 	free(m);
@@ -1055,6 +1068,17 @@ cleanuplisteners(void)
 	wl_list_remove(&new_xwayland_surface.link);
 	wl_list_remove(&xwayland_ready.link);
 #endif
+}
+
+void
+clearseparators(Monitor *m)
+{
+	struct wlr_scene_node *node, *tmp;
+
+	wl_list_for_each_safe(node, tmp, &m->separators->children, link) {
+		free(node->data);
+		wlr_scene_node_destroy(node);
+	}
 }
 
 void
@@ -1338,6 +1362,7 @@ createmon(struct wl_listener *listener, void *data)
 
 	m = wlr_output->data = ecalloc(1, sizeof(*m));
 	m->wlr_output = wlr_output;
+	m->separators = wlr_scene_tree_create(layers[LyrTile]);
 
 	for (i = 0; i < LENGTH(m->layers); i++)
 		wl_list_init(&m->layers[i]);
@@ -1788,6 +1813,66 @@ drawbars(void)
 }
 
 void
+drawseparators(Monitor *m)
+{
+	Client *a, *b;
+	Separator *separator;
+	struct wlr_scene_node *node;
+	struct wl_list *unused = m->separators->children.next;
+	struct wlr_box box;
+	int x, y, right, bottom;
+
+	/* Each adjacent pair owns one segment. Reuse scene nodes on client commits. */
+	wl_list_for_each(a, &clients, link) {
+		if (!borderpx || !VISIBLEON(a, m) || a->isfloating || a->isfullscreen)
+			continue;
+		wl_list_for_each(b, &clients, link) {
+			if (b == a)
+				break;
+			if (!VISIBLEON(b, m) || b->isfloating || b->isfullscreen)
+				continue;
+			x = MAX(a->geom.x, b->geom.x);
+			y = MAX(a->geom.y, b->geom.y);
+			right = MIN(a->geom.x + a->geom.width, b->geom.x + b->geom.width);
+			bottom = MIN(a->geom.y + a->geom.height, b->geom.y + b->geom.height);
+			if (bottom > y && (a->geom.x + a->geom.width + (int)borderpx == b->geom.x
+					|| b->geom.x + b->geom.width + (int)borderpx == a->geom.x)) {
+				/* Continue the column divider through horizontal junctions. */
+				if (bottom < m->w.y + m->w.height)
+					bottom += (int)borderpx;
+				box = (struct wlr_box){x - (int)borderpx, y, (int)borderpx, bottom - y};
+			} else if (right > x && (a->geom.y + a->geom.height + (int)borderpx == b->geom.y
+					|| b->geom.y + b->geom.height + (int)borderpx == a->geom.y)) {
+				box = (struct wlr_box){x, y - (int)borderpx, right - x, (int)borderpx};
+			} else {
+				continue;
+			}
+			if (unused == &m->separators->children) {
+				separator = ecalloc(1, sizeof(*separator));
+				separator->rect = wlr_scene_rect_create(m->separators, 0, 0,
+						(float[])COLOR(colors[SchemeNorm][ColBorder]));
+				separator->rect->node.data = separator;
+			} else {
+				node = wl_container_of(unused, node, link);
+				unused = unused->next;
+				separator = node->data;
+			}
+			separator->a = a;
+			separator->b = b;
+			wlr_scene_rect_set_size(separator->rect, box.width, box.height);
+			wlr_scene_node_set_position(&separator->rect->node, box.x, box.y);
+		}
+	}
+	while (unused != &m->separators->children) {
+		node = wl_container_of(unused, node, link);
+		unused = unused->next;
+		free(node->data);
+		wlr_scene_node_destroy(node);
+	}
+	updateseparatorcolors();
+}
+
+void
 focusclient(Client *c, LayerSurface *l, int lift)
 {
 	struct wlr_surface *surface, *old = seat->keyboard_state.focused_surface;
@@ -1827,7 +1912,7 @@ focusclient(Client *c, LayerSurface *l, int lift)
 	}
 
 	/* If an overlay is focused, don't focus or activate the client,
-	 * but only update its position in fstack to render its border with (float[])COLOR(colors[SchemeSel][ColBorder])
+	 * but only update its position in fstack to render its focused border color
 	 * and focus it after the overlay is closed. */
 	if (!l && old && (!c || client_surface(c) != old)
 			&& old_client_type == LayerShell && wlr_scene_node_coords(
@@ -1845,6 +1930,7 @@ focusclient(Client *c, LayerSurface *l, int lift)
 		focused_client = NULL;
 	}
 	drawbars();
+	updateseparatorcolors();
 
 	if (!c && !l) {
 		/* With no client, all we have left is to clear focus */
@@ -1865,6 +1951,7 @@ focusclient(Client *c, LayerSurface *l, int lift)
 
 	if (!client_is_unmanaged(c))
 		focused_client = c;
+	updateseparatorcolors();
 }
 
 void
@@ -3175,38 +3262,42 @@ tagmon(const Arg *arg)
 void
 tile(Monitor *m)
 {
-	unsigned int mw, my, ty, draw_borders = 1;
+	int mw, my, ty, gap = (int)borderpx, column_gap;
 	int i, n = 0;
 	Client *c;
 
 	wl_list_for_each(c, &clients, link)
 		if (VISIBLEON(c, m) && !c->isfloating && !c->isfullscreen)
 			n++;
-	if (n == 0)
+	if (n == 0) {
+		clearseparators(m);
 		return;
-
-	if (n == smartborders)
-		draw_borders = 0;
+	}
 
 	if (n > m->nmaster)
 		mw = m->nmaster ? (int)roundf(m->w.width * m->mfact) : 0;
 	else
 		mw = m->w.width;
+	column_gap = n > m->nmaster && m->nmaster > 0 ? gap : 0;
+	mw -= column_gap / 2;
 	i = my = ty = 0;
 	wl_list_for_each(c, &clients, link) {
 		if (!VISIBLEON(c, m) || c->isfloating || c->isfullscreen)
 			continue;
 		if (i < m->nmaster) {
 			resize(c, (struct wlr_box){.x = m->w.x, .y = m->w.y + my, .width = mw,
-				.height = (m->w.height - my) / (MIN(n, m->nmaster) - i)}, 0, draw_borders);
-			my += c->geom.height;
+				.height = (m->w.height - my - gap * (MIN(n, m->nmaster) - i - 1))
+					/ (MIN(n, m->nmaster) - i)}, 0, 0);
+			my += c->geom.height + gap;
 		} else {
-			resize(c, (struct wlr_box){.x = m->w.x + mw, .y = m->w.y + ty,
-				.width = m->w.width - mw, .height = (m->w.height - ty) / (n - i)}, 0, draw_borders);
-			ty += c->geom.height;
+			resize(c, (struct wlr_box){.x = m->w.x + mw + column_gap, .y = m->w.y + ty,
+				.width = m->w.width - mw - column_gap,
+				.height = (m->w.height - ty - gap * (n - i - 1)) / (n - i)}, 0, 0);
+			ty += c->geom.height + gap;
 		}
 		i++;
 	}
+	drawseparators(m);
 }
 
 void
@@ -3506,6 +3597,25 @@ updatebar(Monitor *m)
 }
 
 void
+updateseparatorcolors(void)
+{
+	Monitor *m;
+	struct wlr_scene_node *node;
+	Separator *separator;
+	int scheme;
+
+	wl_list_for_each(m, &mons, link) {
+		wl_list_for_each(node, &m->separators->children, link) {
+			separator = node->data;
+			scheme = separator->a == focused_client || separator->b == focused_client
+					? SchemeSel : separator->a->isurgent || separator->b->isurgent
+					? SchemeUrg : SchemeNorm;
+			wlr_scene_rect_set_color(separator->rect, (float[])COLOR(colors[scheme][ColBorder]));
+		}
+	}
+}
+
+void
 updatetitle(struct wl_listener *listener, void *data)
 {
 	Client *c = wl_container_of(listener, c, set_title);
@@ -3533,6 +3643,7 @@ urgent(struct wl_listener *listener, void *data)
 
 	c->isurgent = 1;
 	drawbars();
+	updateseparatorcolors();
 
 	if (client_surface(c)->mapped)
 		client_set_border_color(c, (float[])COLOR(colors[SchemeUrg][ColBorder]));
@@ -3762,6 +3873,7 @@ sethints(struct wl_listener *listener, void *data)
 
 	c->isurgent = xcb_icccm_wm_hints_get_urgency(c->surface.xwayland->hints);
 	drawbars();
+	updateseparatorcolors();
 
 	if (c->isurgent && surface && surface->mapped)
 		client_set_border_color(c, (float[])COLOR(colors[SchemeUrg][ColBorder]));

@@ -5,12 +5,16 @@ outputs and software rendering in a private runtime directory under
 `~/codex-tmp`. They do not connect to the active desktop.
 
 Requirements: the normal build dependencies, GCC or Clang with AddressSanitizer
-and UndefinedBehaviorSanitizer, Python 3, `foot`, `grim`, and XWayland when enabled.
+and UndefinedBehaviorSanitizer, Python 3 with Pillow, `foot`, `grim`, and XWayland when enabled.
 
 The test includes the compositor source to inspect state while real Wayland
 terminals and an X11 client connect. It checks bar clicks, keybinding definitions,
-per-tag settings, status input, smart borders, fullscreen and floating layouts,
-monitor navigation, XWayland popup stacking, screenshot capture, and teardown.
+per-tag settings, status input, tiled separators, focus and urgency colors,
+zero and multiple master slots, smart borders, fullscreen and floating layouts,
+monitor navigation, XWayland popup stacking, screenshot pixels, and teardown.
+The tiled screenshot checks that outer edges contain client content, separators
+have exactly the configured width, and the junction between three windows has no hole.
+Set `DWL_TEST_ARTIFACT_DIR` to keep the tiled screenshot after the checks finish.
 It uses the standard three layouts and expects two outputs with a visible bar.
 
 The sanitizer checks stop on invalid memory accesses or undefined behavior.
